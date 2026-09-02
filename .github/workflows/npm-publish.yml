@@ -1,0 +1,116 @@
+name: npm publish
+
+on:
+  push:
+    tags:
+      - "v0.0.0-bootstrap.*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build the verified archive
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.14.0"
+      - name: Validate tag and package identity
+        run: |
+          set -euo pipefail
+          npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && ($2 > 5 || ($2 == 5 && $3 >= 1)))) }'
+          grep -Eq '^v0\.0\.0-bootstrap\.[1-9][0-9]*$' <<<"$GITHUB_REF_NAME"
+          test "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = "tag"
+          test "$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{}")" = "$GITHUB_SHA"
+          package_version="$(node -p "require('./package.json').version")"
+          test "v$package_version" = "$GITHUB_REF_NAME"
+      - name: Build the archive and manifest
+        run: |
+          set -euo pipefail
+          staging="${RUNNER_TEMP}/verified-package"
+          mkdir -p "$staging"
+          npm pack --ignore-scripts --json --pack-destination "$staging" > "$staging/pack.json"
+          test "$(find "$staging" -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+          archive="$(find "$staging" -maxdepth 1 -name '*.tgz' -print -quit)"
+          package_version="$(node -p "require('./package.json').version")"
+          digest="$(sha256sum "$archive" | awk '{print $1}')"
+          node -e '
+            const fs = require("node:fs");
+            const [manifestPath, version, filename, digest, commit] = process.argv.slice(1);
+            fs.writeFileSync(manifestPath, JSON.stringify({ packageVersion: version, filename, sha256: digest, commit }, null, 2) + "\n");
+          ' "$staging/archive-manifest.json" "$package_version" "$(basename "$archive")" "$digest" "$GITHUB_SHA"
+          rm -f "$staging/pack.json"
+          printf '## Verified archive\n- file: %s\n- sha256: %s\n' "$(basename "$archive")" "$digest" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the verified archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-package
+          path: ${{ runner.temp }}/verified-package
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the verified archive
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.14.0"
+      - name: Download the verified archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: verified-package
+          path: ${{ runner.temp }}/verified-package
+      - name: Verify the transferred archive
+        run: |
+          set -euo pipefail
+          staging="${RUNNER_TEMP}/verified-package"
+          expected="$(node -p "require('$staging/archive-manifest.json').sha256")"
+          filename="$(node -p "require('$staging/archive-manifest.json').filename")"
+          actual="$(sha256sum "$staging/$filename" | awk '{print $1}')"
+          test "$expected" = "$actual"
+          printf '## Publish\n- sha256 verified: %s\n' "$actual" >> "$GITHUB_STEP_SUMMARY"
+      - name: Enable the bootstrap credential only when provided
+        env:
+          NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${NPM_BOOTSTRAP_TOKEN:-}" ]; then
+            userconfig="${RUNNER_TEMP}/bootstrap-npm-userconfig"
+            printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$userconfig"
+            printf 'NODE_AUTH_TOKEN=%s\n' "$NPM_BOOTSTRAP_TOKEN" >> "$GITHUB_ENV"
+            printf 'NPM_CONFIG_USERCONFIG=%s\n' "$userconfig" >> "$GITHUB_ENV"
+            printf '%s\n' "- credential: one-time bootstrap token" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' "- credential: none; trusted publishing through OIDC" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Publish with the next tag
+        run: |
+          set -euo pipefail
+          staging="${RUNNER_TEMP}/verified-package"
+          filename="$(node -p "require('$staging/archive-manifest.json').filename")"
+          archive_path="$staging/$filename"
+          cd "$staging"
+          npm publish "$archive_path" --ignore-scripts --access public --tag next --provenance
+      - name: Record observed dist-tags
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('${RUNNER_TEMP}/verified-package/archive-manifest.json').packageVersion")"
+          tags="$(npm dist-tag ls @xiongxhc/collective-cognition-bootstrap-20260825)"
+          printf '## Observed dist-tags after publishing %s\n```\n%s\n```\n' "$package_version" "$tags" >> "$GITHUB_STEP_SUMMARY"
+          grep -Eq "^next: ${package_version}$" <<<"$tags"

@@ -1,0 +1,15 @@
+{
+  "name": "@xiongxhc/collective-cognition-bootstrap-20260825",
+  "version": "0.0.0-bootstrap.1",
+  "description": "Throwaway registry-fact experiment for the collective-cognition-sdk Phase 3 release process. Not for use.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./index.js",
+  "files": ["index.js", "LICENSE", "README.md"],
+  "publishConfig": { "access": "public" },
+  "engines": { "node": ">=24" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiongxhc/collective-cognition-bootstrap-20260825.git"
+  }
+}
