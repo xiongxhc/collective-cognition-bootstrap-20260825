@@ -106,7 +106,7 @@ jobs:
           filename="$(node -p "require('$staging/archive-manifest.json').filename")"
           archive_path="$staging/$filename"
           cd "$staging"
-          npm publish "$archive_path" --ignore-scripts --access public --tag next --provenance
+          npm publish "$archive_path" --ignore-scripts --access public --tag next --provenance --loglevel verbose
       - name: Record observed dist-tags
         run: |
           set -euo pipefail

@@ -1,6 +1,6 @@
 {
   "name": "@xiongxhc/collective-cognition-bootstrap-20260825",
-  "version": "0.0.0-bootstrap.2",
+  "version": "0.0.0-bootstrap.3",
   "description": "Throwaway registry-fact experiment for the collective-cognition-sdk Phase 3 release process. Not for use.",
   "license": "Apache-2.0",
   "type": "module",
